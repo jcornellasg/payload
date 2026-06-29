@@ -1,6 +1,8 @@
 import type { QueryOptions, UpdateQuery } from 'mongoose'
 import type { UpdateOne } from 'payload'
 
+import { VersionConflict } from 'payload'
+
 import type { MongooseAdapter } from './index.js'
 
 import { buildQuery } from './queries/buildQuery.js'
@@ -17,6 +19,7 @@ export const updateOne: UpdateOne = async function updateOne(
     collection: collectionSlug,
     data,
     locale,
+    optimisticLock,
     options: optionsArgs = {},
     req,
     returning,
@@ -25,7 +28,17 @@ export const updateOne: UpdateOne = async function updateOne(
   },
 ) {
   const { collectionConfig, Model } = getCollection({ adapter: this, collectionSlug })
-  const where = id ? { id: { equals: id } } : whereArg
+  let where = id ? { id: { equals: id } } : whereArg
+
+  if (optimisticLock) {
+    where = {
+      and: [
+        where,
+        { [optimisticLock.field]: { equals: optimisticLock.value } },
+      ],
+    }
+  }
+
   const fields = collectionConfig.fields
 
   const query = await buildQuery({
@@ -55,6 +68,10 @@ export const updateOne: UpdateOne = async function updateOne(
     fields,
     operation: 'write',
   })
+
+  if (optimisticLock) {
+    $inc[optimisticLock.field] = 1
+  }
 
   const updateOps: UpdateQuery<any> = {}
 
@@ -95,8 +112,11 @@ export const updateOne: UpdateOne = async function updateOne(
 
   try {
     if (returning === false) {
-      await Model.updateOne(query, updateData, baseOptions)
+      const updateResult = await Model.updateOne(query, updateData, baseOptions)
       transform({ adapter: this, data, fields, operation: 'read' })
+      if (optimisticLock && updateResult.matchedCount === 0) {
+        throw new VersionConflict(id)
+      }
       return null
     } else {
       result = await Model.findOneAndUpdate(query, updateData, findOptions)
@@ -106,6 +126,9 @@ export const updateOne: UpdateOne = async function updateOne(
   }
 
   if (!result) {
+    if (optimisticLock) {
+      throw new VersionConflict(id)
+    }
     return null
   }
 

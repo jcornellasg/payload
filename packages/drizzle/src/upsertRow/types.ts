@@ -22,6 +22,10 @@ type BaseArgs = {
    */
   ignoreResult?: 'idOnly' | boolean
   joinQuery?: JoinQuery
+  optimisticLock?: {
+    field: string
+    value: number
+  }
   path?: string
   req?: Partial<PayloadRequest>
   tableName: string

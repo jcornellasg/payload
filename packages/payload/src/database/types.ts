@@ -557,6 +557,10 @@ export type UpdateOneArgs = {
   draft?: boolean
   joins?: JoinQuery
   locale?: string
+  optimisticLock?: {
+    field: string
+    value: number
+  }
   /**
    * Additional database adapter specific options to pass to the query
    */

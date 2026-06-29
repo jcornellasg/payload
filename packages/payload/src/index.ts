@@ -1536,6 +1536,7 @@ export {
   UnverifiedEmail,
   ValidationError,
   ValidationErrorName,
+  VersionConflict,
 } from './errors/index.js'
 export type { ValidationFieldError } from './errors/index.js'
 

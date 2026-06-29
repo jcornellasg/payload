@@ -152,6 +152,12 @@ export const updateDocument = async <
     showHiddenFields: true,
   })
 
+  const optimisticLock =
+    collectionConfig.optimisticLocking &&
+    typeof originalDoc?.version === 'number'
+      ? { field: 'version' as const, value: originalDoc.version }
+      : undefined
+
   const isRestoringDraftFromTrash = Boolean(originalDoc?.deletedAt) && data?._status !== 'published'
 
   if (collectionConfig.auth) {
@@ -348,6 +354,10 @@ export const updateDocument = async <
 
   const dataToUpdate: JsonObject = { ...result }
 
+  if (optimisticLock) {
+    delete dataToUpdate[optimisticLock.field]
+  }
+
   // /////////////////////////////////////
   // Handle potential password update
   // /////////////////////////////////////
@@ -376,6 +386,7 @@ export const updateDocument = async <
       collection: collectionConfig.slug,
       data: dataToUpdate,
       locale,
+      optimisticLock,
       req,
     })
   }
