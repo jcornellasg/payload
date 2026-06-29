@@ -689,6 +689,13 @@ export type CollectionConfig<TSlug extends CollectionSlug = any> = {
       }
     | false
   /**
+   * Enables optimistic locking for the collection. When enabled, a `version` column
+   * is expected to exist on the table. On update, the database will only apply the
+   * change if the version matches, preventing lost updates from concurrent requests.
+   * @default false
+   */
+  optimisticLocking?: boolean
+  /**
    * If true, enables custom ordering for the collection, and documents in the listView can be reordered via drag and drop.
    * New documents are inserted at the end of the list according to this parameter.
    *

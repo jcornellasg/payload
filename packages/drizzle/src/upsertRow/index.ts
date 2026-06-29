@@ -2,7 +2,9 @@ import type { LibSQLDatabase } from 'drizzle-orm/libsql'
 import type { SelectedFields } from 'drizzle-orm/sqlite-core'
 import type { TypeWithID } from 'payload'
 
-import { and, desc, eq, isNull, or } from 'drizzle-orm'
+import { VersionConflict } from 'payload'
+
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm'
 
 import type { BlockRowToInsert } from '../transform/write/types.js'
 import type { Args } from './types.js'
@@ -47,6 +49,7 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
   // Make a new argument in upsertRow.ts and pass the slug from every operation.
   customID,
   joinQuery: _joinQuery,
+  optimisticLock,
   operation,
   path = '',
   req,
@@ -57,6 +60,16 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
 }: Args): Promise<T> => {
   if (operation === 'create' && !data.createdAt) {
     data.createdAt = new Date().toISOString()
+  }
+
+  if (operation === 'create') {
+    const isOptimisticLockingEnabled =
+      !!collectionSlug &&
+      adapter.payload?.collections?.[collectionSlug]?.config?.optimisticLocking === true
+    const table = adapter.tables[tableName]
+    if (isOptimisticLockingEnabled && 'version' in table && table.version !== undefined && data.version === undefined) {
+      data.version = 1
+    }
   }
 
   markWrite(adapter)
@@ -75,6 +88,18 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
       const { arraysToPush } = transformedForWrite
 
       const drizzle = db as LibSQLDatabase
+
+      const updateTable = adapter.tables[tableName]
+      const versionTable = optimisticLock ? updateTable[optimisticLock.field] : undefined
+      const hasVersionLock = versionTable !== undefined && optimisticLock !== undefined
+
+      if (hasVersionLock) {
+        row[optimisticLock.field] = sql`${versionTable} + 1`
+      }
+
+      const whereClause = hasVersionLock
+        ? and(eq(updateTable.id, id), eq(versionTable, optimisticLock.value))
+        : eq(updateTable.id, id)
 
       // First, handle $push arrays
 
@@ -101,10 +126,19 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
         if (hasDataToUpdate) {
           // Only update row if there is something to update.
           // Example: if the data only consists of a single $push, calling insertArrays is enough - we don't need to update the row.
-          await drizzle
-            .update(adapter.tables[tableName])
-            .set(row)
-            .where(eq(adapter.tables[tableName].id, id))
+          if (hasVersionLock) {
+            const result = await drizzle
+              .update(updateTable)
+              .set(row)
+              .where(whereClause)
+              .returning({ id: updateTable.id })
+
+            if (result.length === 0) {
+              throw new VersionConflict(id)
+            }
+          } else {
+            await drizzle.update(updateTable).set(row).where(eq(updateTable.id, id))
+          }
         }
         return ignoreResult === 'idOnly' ? ({ id } as T) : null
       }
@@ -151,10 +185,14 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
         }
 
         const docs = await drizzle
-          .update(adapter.tables[tableName])
+          .update(updateTable)
           .set(row)
-          .where(eq(adapter.tables[tableName].id, id))
+          .where(whereClause)
           .returning(Object.keys(selectedFields).length ? selectedFields : undefined)
+
+        if (hasVersionLock && docs.length === 0) {
+          throw new VersionConflict(id)
+        }
 
         return transform<T>({
           adapter,
@@ -168,10 +206,19 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
 
       // DB Update that needs the result, potentially with joins => need to update first, then find. returning() does not work with joins.
 
-      await drizzle
-        .update(adapter.tables[tableName])
-        .set(row)
-        .where(eq(adapter.tables[tableName].id, id))
+      if (hasVersionLock) {
+        const updateResult = await drizzle
+          .update(updateTable)
+          .set(row)
+          .where(whereClause)
+          .returning({ id: updateTable.id })
+
+        if (updateResult.length === 0) {
+          throw new VersionConflict(id)
+        }
+      } else {
+        await drizzle.update(updateTable).set(row).where(eq(updateTable.id, id))
+      }
 
       findManyArgs.where = eq(adapter.tables[tableName].id, insertedRow.id)
 
@@ -220,14 +267,43 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
         (hasLocalizedData || !rowKeys.every((key) => key === 'updatedAt' || key === 'createdAt'))
 
       if (hasMainRowData) {
+        const generalTable = adapter.tables[tableName]
+        const generalVersionColumn = optimisticLock ? generalTable[optimisticLock.field] : undefined
+        const hasGeneralVersionLock = generalVersionColumn !== undefined && optimisticLock !== undefined
+
+        if (hasGeneralVersionLock) {
+          rowToInsert.row[optimisticLock.field] = sql`${generalVersionColumn} + 1`
+        }
+
         if (id) {
           rowToInsert.row.id = id
-          ;[insertedRow] = await adapter.insert({
-            db,
-            onConflictDoUpdate: { set: rowToInsert.row, target },
-            tableName,
-            values: rowToInsert.row,
-          })
+
+          if (hasGeneralVersionLock) {
+            const drizzleGeneral = db as LibSQLDatabase
+            const result = await drizzleGeneral
+              .update(generalTable)
+              .set(rowToInsert.row)
+              .where(
+                and(
+                  eq(generalTable.id, id),
+                  eq(generalVersionColumn, optimisticLock.value),
+                ),
+              )
+              .returning({ id: generalTable.id })
+
+            if (result.length === 0) {
+              throw new VersionConflict(id)
+            }
+
+            insertedRow = result[0] as Record<string, unknown>
+          } else {
+            ;[insertedRow] = await adapter.insert({
+              db,
+              onConflictDoUpdate: { set: rowToInsert.row, target },
+              tableName,
+              values: rowToInsert.row,
+            })
+          }
         } else {
           ;[insertedRow] = await adapter.insert({
             db,

@@ -243,6 +243,30 @@ export const sanitizeCollection = async (
     }
   }
 
+  if (sanitized.optimisticLocking) {
+    let hasVersion: boolean | null = null
+
+    sanitized.fields.some((field) => {
+      if (fieldAffectsData(field) && field.name === 'version') {
+        hasVersion = true
+      }
+      return hasVersion
+    })
+
+    if (!hasVersion) {
+      sanitized.fields.push({
+        name: 'version',
+        type: 'number',
+        admin: {
+          disabled: { bulkEdit: true },
+          hidden: true,
+        },
+        defaultValue: 1,
+        label: 'Version',
+      })
+    }
+  }
+
   const defaultLabels = formatLabels(sanitized.slug)
 
   sanitized.labels = {
