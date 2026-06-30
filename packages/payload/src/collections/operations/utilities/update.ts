@@ -158,8 +158,7 @@ export const updateDocument = async <
       : undefined
 
   const optimisticLock =
-    collectionConfig.optimisticLocking &&
-    typeof originalDoc?.version === 'number'
+    collectionConfig.optimisticLocking && typeof originalDoc?.version === 'number'
       ? { field: 'version' as const, value: clientSentVersion ?? originalDoc.version }
       : undefined
 
