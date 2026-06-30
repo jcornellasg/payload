@@ -12,12 +12,12 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "seed": "npm run payload migrate:fresh",
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
-    "test:locking": "tsx src/test-locking.ts"
+    "test:locking": "cross-env NODE_OPTIONS=--no-deprecation tsx --env-file=.env src/test-locking.ts"
   },
   "dependencies": {
     "@payloadcms/db-sqlite": "workspace:*",
     "@payloadcms/next": "workspace:*",
-    "@payloadcms/richtext-slate": "workspace:*",
+    "@payloadcms/richtext-lexical": "workspace:*",
     "@payloadcms/ui": "workspace:*",
     "cross-env": "^7.0.3",
     "next": "^15.4.10",

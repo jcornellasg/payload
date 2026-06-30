@@ -8,8 +8,8 @@ import { VersionConflict } from 'payload'
  * GET  /api/posts-simulate-lock?id=<postId>
  *
  * 1. Reads the current post
- * 2. Updates it (simulates client A)
- * 3. Tries to update again with the OLD version (simulates client B)
+ * 2. Fires two updates in parallel (simulating concurrent clients)
+ * 3. One succeeds, the other fails with 409
  * 4. Returns a summary of what happened
  */
 export const simulateLockHandler: PayloadHandler = async (req) => {
@@ -20,45 +20,46 @@ export const simulateLockHandler: PayloadHandler = async (req) => {
     return Response.json({ error: 'Missing ?id= query param' }, { status: 400 })
   }
 
-  const results: Record<string, unknown>[] = []
-
   // Step 1: Read
   const doc = await req.payload.findByID({
     collection: 'posts',
     id: postId,
   })
-  results.push({ step: 'read', version: doc.version, title: doc.title })
 
-  // Step 2: Client A updates (should succeed)
-  try {
-    const updated = await req.payload.update({
+  // Step 2: Fire two concurrent updates with the SAME stale version
+  const now = new Date().toISOString()
+  const [resultA, resultB] = await Promise.allSettled([
+    req.payload.update({
       collection: 'posts',
       id: postId,
-      data: { title: `Updated by A at ${new Date().toISOString()}`, version: doc.version },
-    })
-    results.push({ step: 'client-A-update', status: 'ok', newVersion: updated.version })
-  } catch (err) {
-    results.push({ step: 'client-A-update', status: 'error', message: err.message })
-  }
-
-  // Step 3: Client B updates with stale version (should fail)
-  try {
-    await req.payload.update({
+      data: { title: `Updated by A at ${now}`, version: doc.version },
+    }),
+    req.payload.update({
       collection: 'posts',
       id: postId,
-      data: { title: `Updated by B at ${new Date().toISOString()}`, version: doc.version },
-    })
-    results.push({ step: 'client-B-update', status: 'unexpected-success' })
-  } catch (err) {
-    results.push({
+      data: { title: `Updated by B at ${now}`, version: doc.version },
+    }),
+  ])
+
+  const results: Record<string, unknown>[] = [
+    { step: 'read', version: doc.version, title: doc.title },
+    {
+      step: 'client-A-update',
+      status: resultA.status === 'fulfilled' ? 'ok' : 'conflict',
+      ...(resultA.status === 'fulfilled'
+        ? { newVersion: resultA.value.version }
+        : { message: resultA.reason?.message }),
+    },
+    {
       step: 'client-B-update',
-      status: 'expected-conflict',
-      message: err.message,
-      httpStatus: err.status,
-    })
-  }
+      status: resultB.status === 'fulfilled' ? 'ok' : 'conflict',
+      ...(resultB.status === 'fulfilled'
+        ? { newVersion: resultB.value.version }
+        : { message: resultB.reason?.message }),
+    },
+  ]
 
-  // Step 4: Final state
+  // Step 3: Final state
   const final = await req.payload.findByID({
     collection: 'posts',
     id: postId,
