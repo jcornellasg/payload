@@ -151,10 +151,15 @@ export const updateDocument = async <
     showHiddenFields: true,
   })
 
+  const clientSentVersion =
+    collectionConfig.optimisticLocking && typeof data?.version === 'number'
+      ? data.version
+      : undefined
+
   const optimisticLock =
     collectionConfig.optimisticLocking &&
     typeof originalDoc?.version === 'number'
-      ? { field: 'version' as const, value: originalDoc.version }
+      ? { field: 'version' as const, value: clientSentVersion ?? originalDoc.version }
       : undefined
 
   const isRestoringDraftFromTrash = Boolean(originalDoc?.deletedAt) && data?._status !== 'published'

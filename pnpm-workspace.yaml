@@ -5,6 +5,7 @@ packages:
   - 'templates/blank'
   - 'templates/website'
   - 'templates/ecommerce'
+  - 'examples/*'
 
 updateNotifier: false
 symlink: true

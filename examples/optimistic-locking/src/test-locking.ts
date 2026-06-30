@@ -2,9 +2,8 @@
  * Test script for optimistic locking.
  *
  * This script demonstrates two concurrent updates to the same document.
- * The first update succeeds (version 1 → 2).
- * The second update fails with a 409 VersionConflict because the version
- * no longer matches (still has version 1, but DB is now at 2).
+ * Both clients read the same version, then fire updates in parallel.
+ * One succeeds (version bumps), the other fails with 409.
  *
  * Usage: pnpm test:locking
  */
@@ -26,79 +25,65 @@ async function main() {
   })
   console.log(`   Created post id=${post.id}, version=${post.version}`)
 
-  // 2. Read the post (simulates client A reading)
+  // 2. Both clients read the same version
   const clientA = await payload.findByID({
     collection: 'posts',
     id: post.id,
   })
-  console.log(`\n2. Client A reads: version=${clientA.version}`)
-
-  // 3. Read the post (simulates client B reading the same version)
   const clientB = await payload.findByID({
     collection: 'posts',
     id: post.id,
   })
+  console.log(`\n2. Client A reads: version=${clientA.version}`)
   console.log(`   Client B reads: version=${clientB.version}`)
 
-  // 4. Client A updates first — should succeed
-  console.log('\n3. Client A updates (should succeed)...')
-  try {
-    const updatedByA = await payload.update({
+  // 3. Fire both updates in parallel — one must fail
+  console.log('\n3. Firing concurrent updates with the same stale version...')
+  const now = new Date().toISOString()
+
+  const [resultA, resultB] = await Promise.allSettled([
+    payload.update({
       collection: 'posts',
       id: post.id,
       data: {
-        title: 'Updated by Client A',
+        title: `Updated by Client A at ${now}`,
         version: clientA.version,
       },
-    })
-    console.log(`   OK → version=${updatedByA.version}, title="${updatedByA.title}"`)
-  } catch (err) {
-    console.log(`   ERROR: ${err.message}`)
-  }
-
-  // 5. Client B updates with stale version — should fail
-  console.log('\n4. Client B updates with stale version (should fail with 409)...')
-  try {
-    const updatedByB = await payload.update({
+    }),
+    payload.update({
       collection: 'posts',
       id: post.id,
       data: {
-        title: 'Updated by Client B',
+        title: `Updated by Client B at ${now}`,
         version: clientB.version,
       },
-    })
-    console.log(`   UNEXPECTED SUCCESS → version=${updatedByB.version}`)
-  } catch (err) {
-    console.log(`   Expected error: ${err.message} (status=${err.status || 'unknown'})`)
-  }
+    }),
+  ])
 
-  // 6. Client B re-reads and retries — should succeed
-  console.log('\n5. Client B re-reads and retries (should succeed)...')
-  const freshB = await payload.findByID({
-    collection: 'posts',
-    id: post.id,
-  })
-  console.log(`   Re-read: version=${freshB.version}`)
-  try {
-    const retriedByB = await payload.update({
-      collection: 'posts',
-      id: post.id,
-      data: {
-        title: 'Updated by Client B (retry)',
-        version: freshB.version,
-      },
-    })
-    console.log(`   OK → version=${retriedByB.version}, title="${retriedByB.title}"`)
-  } catch (err) {
-    console.log(`   ERROR: ${err.message}`)
-  }
+  console.log(
+    `   Client A: ${resultA.status === 'fulfilled' ? `OK (version=${resultA.value.version})` : `CONFLICT (${resultA.reason.message})`}`,
+  )
+  console.log(
+    `   Client B: ${resultB.status === 'fulfilled' ? `OK (version=${resultB.value.version})` : `CONFLICT (${resultB.reason.message})`}`,
+  )
 
-  // 7. Show final state
+  // 4. Final state
   const final = await payload.findByID({
     collection: 'posts',
     id: post.id,
   })
-  console.log(`\n6. Final state: version=${final.version}, title="${final.title}"`)
+  console.log(`\n4. Final state: version=${final.version}, title="${final.title}"`)
+
+  // 5. Verify exactly one succeeded
+  const successCount = [resultA, resultB].filter((r) => r.status === 'fulfilled').length
+  const conflictCount = [resultA, resultB].filter((r) => r.status === 'rejected').length
+  console.log(`\n5. Summary: ${successCount} succeeded, ${conflictCount} conflicted`)
+
+  if (successCount === 1 && conflictCount === 1) {
+    console.log('   ✓ Optimistic locking is working correctly!')
+  } else {
+    console.log('   ✗ Expected exactly 1 success and 1 conflict')
+  }
 
   process.exit(0)
 }

@@ -1,5 +1,5 @@
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
-import { slateEditor } from '@payloadcms/richtext-slate'
+import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { fileURLToPath } from 'node:url'
 import path from 'path'
 import { buildConfig } from 'payload'
@@ -19,7 +19,7 @@ export default buildConfig({
       url: process.env.DATABASE_URL || 'file:./data.db',
     },
   }),
-  editor: slateEditor({}),
+  editor: lexicalEditor({}),
   secret: process.env.PAYLOAD_SECRET || '',
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),
