@@ -115,11 +115,11 @@ export const updateDocument = async <
     !publishAllLocales
   const shouldSavePassword = Boolean(
     password &&
-      collectionConfig.auth &&
-      (!collectionConfig.auth.disableLocalStrategy ||
-        (typeof collectionConfig.auth.disableLocalStrategy === 'object' &&
-          collectionConfig.auth.disableLocalStrategy.enableFields)) &&
-      !isSavingDraft,
+    collectionConfig.auth &&
+    (!collectionConfig.auth.disableLocalStrategy ||
+      (typeof collectionConfig.auth.disableLocalStrategy === 'object' &&
+        collectionConfig.auth.disableLocalStrategy.enableFields)) &&
+    !isSavingDraft,
   )
 
   if (isSavingDraft) {
@@ -153,8 +153,7 @@ export const updateDocument = async <
   })
 
   const optimisticLock =
-    collectionConfig.optimisticLocking &&
-    typeof originalDoc?.version === 'number'
+    collectionConfig.optimisticLocking && typeof originalDoc?.version === 'number'
       ? { field: 'version' as const, value: originalDoc.version }
       : undefined
 
